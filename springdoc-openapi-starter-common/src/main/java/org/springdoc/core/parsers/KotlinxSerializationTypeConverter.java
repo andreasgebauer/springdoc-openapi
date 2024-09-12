@@ -1,53 +1,25 @@
-package org.springdoc.kotlin;
+package org.springdoc.core.parsers;
 
 import io.swagger.v3.core.converter.AnnotatedType;
 import io.swagger.v3.core.converter.ModelConverter;
 import io.swagger.v3.core.converter.ModelConverterContext;
-import io.swagger.v3.oas.models.Components;
-import io.swagger.v3.oas.models.media.ArraySchema;
-import io.swagger.v3.oas.models.media.BooleanSchema;
-import io.swagger.v3.oas.models.media.ComposedSchema;
-import io.swagger.v3.oas.models.media.Discriminator;
-import io.swagger.v3.oas.models.media.IntegerSchema;
-import io.swagger.v3.oas.models.media.NumberSchema;
-import io.swagger.v3.oas.models.media.ObjectSchema;
-import io.swagger.v3.oas.models.media.Schema;
-import io.swagger.v3.oas.models.media.StringSchema;
+import io.swagger.v3.oas.models.media.*;
 import kotlin.jvm.functions.Function1;
 import kotlin.reflect.KClass;
-import kotlinx.serialization.DeserializationStrategy;
-import kotlinx.serialization.KSerializer;
-import kotlinx.serialization.Serializable;
-import kotlinx.serialization.SerializationStrategy;
-import kotlinx.serialization.SerializersKt;
-import kotlinx.serialization.descriptors.PolymorphicKind;
-import kotlinx.serialization.descriptors.PrimitiveKind;
-import kotlinx.serialization.descriptors.SerialDescriptor;
-import kotlinx.serialization.descriptors.SerialKind;
-import kotlinx.serialization.descriptors.StructureKind;
+import kotlinx.serialization.*;
+import kotlinx.serialization.descriptors.*;
 import kotlinx.serialization.json.Json;
 import kotlinx.serialization.json.JsonClassDiscriminator;
 import kotlinx.serialization.modules.SerializersModule;
 import kotlinx.serialization.modules.SerializersModuleCollector;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import java.lang.reflect.Field;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
@@ -55,7 +27,7 @@ import java.util.regex.Pattern;
 
 import static io.swagger.v3.core.util.RefUtils.constructRef;
 import static io.swagger.v3.core.util.RefUtils.extractSimpleName;
-import static org.springdoc.core.Constants.SPRINGDOC_ENABLED;
+import static org.springdoc.core.utils.Constants.SPRINGDOC_ENABLED;
 
 /**
  * <p>ModelConverter implementation to integrate with kotlinx.serialization as JSON implementation.</p>
@@ -117,7 +89,7 @@ public class KotlinxSerializationTypeConverter implements ModelConverter {
             @Override
             public <Base, Sub extends Base> void polymorphic(@NotNull KClass<Base> baseClass, @NotNull KClass<Sub> subClass, @NotNull KSerializer<Sub> subSerializer) {
                 KSerializer<Base> baseSerializer = SerializersKt.serializer(baseClass);
-                polymorphicMap.computeIfAbsent(getName(baseSerializer.getDescriptor()), (k) -> new ArrayList<>()).add(subSerializer.getDescriptor());
+                polymorphicMap.computeIfAbsent(getName(baseSerializer.getDescriptor()), k -> new ArrayList<>()).add(subSerializer.getDescriptor());
             }
 
             @Override
@@ -130,14 +102,13 @@ public class KotlinxSerializationTypeConverter implements ModelConverter {
     @Override
     public Schema<?> resolve(AnnotatedType annotatedType, ModelConverterContext context, Iterator<ModelConverter> iterator) {
         // Only process types that are annotated with @Serializable
-        if (annotatedType.getType() instanceof Class) {
-            final Class<?> cls = (Class<?>)annotatedType.getType();
-            if (Arrays.stream(cls.getAnnotations()).anyMatch(it -> it instanceof Serializable)) {
-                KSerializer<?> serializer = SerializersKt.serializer(module, cls);
-                SerialDescriptor serialDescriptor = serializer.getDescriptor();
-                return resolveNullableSchema(context, serialDescriptor, null);
-            }
+        if (annotatedType.getType() instanceof Class<?> cls &&
+                Arrays.stream(cls.getAnnotations()).anyMatch(Serializable.class::isInstance)) {
+            KSerializer<?> serializer = SerializersKt.serializer(module, cls);
+            SerialDescriptor serialDescriptor = serializer.getDescriptor();
+            return resolveNullableSchema(context, serialDescriptor, null);
         }
+
         if (iterator.hasNext()) {
             return iterator.next().resolve(annotatedType, context, iterator);
         } else {
@@ -149,7 +120,7 @@ public class KotlinxSerializationTypeConverter implements ModelConverter {
         Schema<?> result = resolveSchema(context, serialDescriptor, baseSchema);
         if (result.get$ref() != null) {
             if (serialDescriptor.isNullable()) {
-                // Unfortunately this workaround is necessary for nullable refs.
+                // Unfortunately, this workaround is necessary for nullable refs.
                 return new ComposedSchema().addAllOfItem(result).nullable(true);
             } else {
                 return result;
@@ -185,7 +156,7 @@ public class KotlinxSerializationTypeConverter implements ModelConverter {
                 final SerialDescriptor elementDescriptor = serialDescriptor.getElementDescriptor(i);
                 final String elementName = serialDescriptor.getElementName(i);
                 if (isNotDefined(context, baseSchema, elementName)) {
-                    schema.addProperties(
+                    schema.addProperty(
                             elementName,
                             resolveNullableSchema(context, elementDescriptor, null)
                     );
@@ -256,9 +227,9 @@ public class KotlinxSerializationTypeConverter implements ModelConverter {
             throw new IllegalStateException("Expected two fields for a polymorphic class descriptor");
         }
         final String discriminatorProperty = serialDescriptor.getAnnotations().stream()
-                .filter(it -> it instanceof JsonClassDiscriminator)
+                .filter(JsonClassDiscriminator.class::isInstance)
                 .findFirst()
-                .map(it -> (JsonClassDiscriminator)it)
+                .map(it -> (JsonClassDiscriminator) it)
                 .map(JsonClassDiscriminator::discriminator)
                 .orElse(defaultDiscriminatorProperty);
         final ComposedSchema composedSchema = (ComposedSchema) createSchema(baseSchema, ComposedSchema::new);
@@ -267,7 +238,7 @@ public class KotlinxSerializationTypeConverter implements ModelConverter {
         final Schema<?> refSchema = defineRef(context, serialDescriptor, composedSchema);
         // Add discriminator
         if (isNotDefined(context, baseSchema, discriminatorProperty)) {
-            composedSchema.addProperties(
+            composedSchema.addProperty(
                     discriminatorProperty, resolveNullableSchema(context, serialDescriptor.getElementDescriptor(0), null)
             );
             // Do not add the discriminator as a required item, because it is only required in the context of polymorphism
@@ -403,7 +374,7 @@ public class KotlinxSerializationTypeConverter implements ModelConverter {
     @NotNull
     private String simplifyName(String name) {
         final String qualifiedName = name;
-        if (name.length() > 0 && !Character.isUpperCase(name.charAt(0))) {
+        if (!name.isEmpty() && !Character.isUpperCase(name.charAt(0))) {
             int pos = -1;
             while (true) {
                 pos = name.indexOf('.', pos + 1);
